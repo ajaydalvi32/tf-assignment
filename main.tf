@@ -1,11 +1,40 @@
 provider "aws" {
-  region = var.region
+  region = "ap-south-1"
+}
+
+resource "aws_vpc" "main" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "main" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "ap-south-1a"
+  map_public_ip_on_launch = true
+}
+
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.main.id
+}
+
+resource "aws_route_table" "rt" {
+  vpc_id = aws_vpc.main.id
+}
+
+resource "aws_route" "r" {
+  route_table_id         = aws_route_table.rt.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.gw.id
+}
+
+resource "aws_route_table_association" "a" {
+  subnet_id      = aws_subnet.main.id
+  route_table_id = aws_route_table.rt.id
 }
 
 # Security group
 resource "aws_security_group" "app_sg" {
-  name        = "app-sg"
-  description = "Allow SSH, Flask and Express ports"
+  vpc_id = aws_vpc.main.id
 
   ingress {
     from_port   = 22
@@ -14,6 +43,7 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Flask (5000)
   ingress {
     from_port   = 5000
     to_port     = 5000
@@ -21,6 +51,7 @@ resource "aws_security_group" "app_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # Express (3000)
   ingress {
     from_port   = 3000
     to_port     = 3000
@@ -36,57 +67,32 @@ resource "aws_security_group" "app_sg" {
   }
 }
 
-# Get latest Ubuntu 22.04 LTS AMI
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
+# Flask instance
+resource "aws_instance" "flask" {
+  ami                    = "ami-0dee22c13ea7a9a67" # Ubuntu 22.04 ap-south-1
+  instance_type          = "t2.micro"
+  subnet_id              = aws_subnet.main.id
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
+  key_name               = "terraform-key"
 
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  user_data = file("user_data_flask.sh")
+
+  tags = {
+    Name = "Flask-Backend"
   }
 }
 
-# EC2 instance
-resource "aws_instance" "app_instance" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = var.instance_type
-  key_name      = var.key_name
-  security_groups = [aws_security_group.app_sg.name]
+# Express instance
+resource "aws_instance" "express" {
+  ami                    = "ami-0dee22c13ea7a9a67" # Ubuntu 22.04 ap-south-1
+  instance_type          = "t2.micro"
+  subnet_id              = aws_subnet.main.id
+  vpc_security_group_ids = [aws_security_group.app_sg.id]
+  key_name               = "terraform-key"
 
-  user_data = <<-EOF
-              #!/bin/bash
-              apt update -y
-              apt install -y python3 python3-pip nodejs npm git
-
-              # Flask app
-              mkdir -p /home/ubuntu/flask-app
-              cat > /home/ubuntu/flask-app/app.py << APP
-from flask import Flask
-app = Flask(__name__)
-@app.route('/')
-def hello():
-    return 'Hello from Flask!'
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-APP
-              nohup python3 /home/ubuntu/flask-app/app.py &
-
-              # Express app
-              mkdir -p /home/ubuntu/express-app
-              cd /home/ubuntu/express-app
-              npm init -y
-              npm install express
-              cat > index.js << EXPRESS
-const express = require('express');
-const app = express();
-app.get('/', (req,res) => res.send('Hello from Express!'));
-app.listen(3000, () => console.log('Express running on port 3000'));
-EXPRESS
-              nohup node index.js &
-              EOF
+  user_data = file("user_data_express.sh")
 
   tags = {
-    Name = "Flask-Express-App"
+    Name = "Express-Frontend"
   }
 }
