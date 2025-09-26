@@ -1,60 +1,67 @@
-provider "aws" {
-  region = "ap-south-1"
+# --------------------
+# ECR Repositories
+# --------------------
+resource "aws_ecr_repository" "backend" {
+  name = var.backend_ecr_name
 }
 
+resource "aws_ecr_repository" "frontend" {
+  name = var.frontend_ecr_name
+}
+
+# --------------------
+# VPC, Subnets, SG
+# --------------------
 resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = var.vpc_cidr
+  tags = { Name = "main-vpc" }
 }
 
-resource "aws_subnet" "main" {
+resource "aws_subnet" "public1" {
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "ap-south-1a"
+  cidr_block              = var.public_subnet_cidr1
   map_public_ip_on_launch = true
+  availability_zone       = "us-east-1a"
 }
 
-resource "aws_internet_gateway" "gw" {
+resource "aws_subnet" "public2" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = var.public_subnet_cidr2
+  map_public_ip_on_launch = true
+  availability_zone       = "us-east-1b"
+}
+
+resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
 }
 
-resource "aws_route_table" "rt" {
-  vpc_id = aws_vpc.main.id
-}
-
-resource "aws_route" "r" {
-  route_table_id         = aws_route_table.rt.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.gw.id
-}
-
-resource "aws_route_table_association" "a" {
-  subnet_id      = aws_subnet.main.id
-  route_table_id = aws_route_table.rt.id
-}
-
-# Security group
-resource "aws_security_group" "app_sg" {
+resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.igw.id
   }
+}
 
-  # Flask (5000)
-  ingress {
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+resource "aws_route_table_association" "a1" {
+  subnet_id      = aws_subnet.public1.id
+  route_table_id = aws_route_table.public.id
+}
 
-  # Express (3000)
+resource "aws_route_table_association" "a2" {
+  subnet_id      = aws_subnet.public2.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_security_group" "ecs_sg" {
+  name        = "ecs-sg"
+  description = "Allow HTTP inbound"
+  vpc_id      = aws_vpc.main.id
+
   ingress {
-    from_port   = 3000
-    to_port     = 3000
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -67,32 +74,45 @@ resource "aws_security_group" "app_sg" {
   }
 }
 
-# Flask instance
-resource "aws_instance" "flask" {
-  ami                    = "ami-0dee22c13ea7a9a67" # Ubuntu 22.04 ap-south-1
-  instance_type          = "t2.micro"
-  subnet_id              = aws_subnet.main.id
-  vpc_security_group_ids = [aws_security_group.app_sg.id]
-  key_name               = "terraform-key"
-
-  user_data = file("user_data_flask.sh")
-
-  tags = {
-    Name = "Flask-Backend"
-  }
+# --------------------
+# ECS Cluster
+# --------------------
+resource "aws_ecs_cluster" "cluster" {
+  name = var.ecs_cluster_name
 }
 
-# Express instance
-resource "aws_instance" "express" {
-  ami                    = "ami-0dee22c13ea7a9a67" # Ubuntu 22.04 ap-south-1
-  instance_type          = "t2.micro"
-  subnet_id              = aws_subnet.main.id
-  vpc_security_group_ids = [aws_security_group.app_sg.id]
-  key_name               = "terraform-key"
+# --------------------
+# ALB
+# --------------------
+resource "aws_lb" "alb" {
+  name               = "my-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.ecs_sg.id]
+  subnets            = [aws_subnet.public1.id, aws_subnet.public2.id]
+}
 
-  user_data = file("user_data_express.sh")
+resource "aws_lb_target_group" "backend_tg" {
+  name     = "backend-tg"
+  port     = 5000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+}
 
-  tags = {
-    Name = "Express-Frontend"
+resource "aws_lb_target_group" "frontend_tg" {
+  name     = "frontend-tg"
+  port     = 3000
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.main.id
+}
+
+resource "aws_lb_listener" "frontend_listener" {
+  load_balancer_arn = aws_lb.alb.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.frontend_tg.arn
   }
 }

@@ -1,0 +1,35 @@
+{
+    "family": "express-frontend-task",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::980921751835:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+        {
+            "name": "express-frontend",
+            "image": "980921751835.dkr.ecr.us-east-1.amazonaws.com/express-frontend:latest",
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "protocol": "tcp"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {
+                    "name": "FLASK_BACKEND_URL",
+                    "value": "http://flask-express-alb-1925787364.us-east-1.elb.amazonaws.com/api"
+                }
+            ],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/express-frontend",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "ecs"
+                }
+            }
+        }
+    ]
+}

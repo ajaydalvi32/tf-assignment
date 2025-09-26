@@ -1,0 +1,22 @@
+{
+    "family": "flask-backend-task",
+    "executionRoleArn": "arn:aws:iam::980921751835:role/ecsTaskExecutionRole",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "256",
+    "memory": "512",
+    "containerDefinitions": [
+      {
+        "name": "flask-backend",
+        "image": "980921751835.dkr.ecr.us-east-1.amazonaws.com/flask-backend:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 5000,
+            "protocol": "tcp"
+          }
+        ]
+      }
+    ]
+  }
+  
